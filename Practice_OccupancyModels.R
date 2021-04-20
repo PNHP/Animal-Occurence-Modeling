@@ -46,6 +46,8 @@ sdat$JulianDate <- format(sdat$Date, "%j")
 #create new 'stacked' site which is a combo of site x visit number
 sdat$SiteXVisit <- paste(sdat$PointID, sdat$VisitNum, sep=".")
 sdat$SiteXVisit <- as.factor(sdat$SiteXVisit)
+sdat$bird_num <- sequence(rle(as.character(sdat$AlphaCode))$lengths) #creates a unique id number for each bird observed
+sdat$SiteXVisit_bird <- paste(sdat$SiteXVisit, sdat$bird_num, sep=".")
 AllSites <- unique(sdat$SiteXVisit) #full list of all possible SiteXVisit possibilities
 
 length(AllSites) #check--is this the expected number of site x visit combinations? If there was a site x visit combo that had no observations at all for any species and no data entered for it, then this list is going to be incomplete
@@ -53,17 +55,6 @@ length(AllSites) #check--is this the expected number of site x visit combination
 VisNum <- 3 #number of times each pointid should have been visited during the season
 length(unique(sdat$PointID))*VisNum #this the expected value if the complete matrix of sitexvisit combinations is present. If this is a greater value than length(AllSites) then you are missing combinations, and you need to go back and reenter the missing ones.
 
-
-
-
-
-#calculate time since sunrise
-sunrisetime <- getSunlightTimes(date=sdat$Date, keep=c("sunrise"), 39.385937, -76.371187, tz="EST")
-sdat$sunrisetime <- sunrisetime[,4] #just the date+time of sunrise
-sdat$TSLSR <- difftime(sdat$DateTime, sdat$sunrisetime, tz="EST", units="min") #time since last sunrise, in minutes
-
-#Julian Day
-sdat$JulianDate <- format(sdat$Date, "%j")
 
 #Write this dataframe out for future reference
 #write.csv(sdat, file="FullTestData.csv")
@@ -80,20 +71,20 @@ detectcols <-c("Pass0.1","Pass1.2","Pass2.3","Pass3.4","Pass4.5","BLRA","LEBI","
 #if subsequent obs of the same individual were marked with an x not a 1, replace all of these x's (or whatever other symbol was used with 1's)
 sdat[,detectcols] <- sapply(sdat[,detectcols], function(x) as.numeric(gsub("X", 1, x))) #for now, replacing x's w/ 1's, to run cap-recapture models; 0's would represent NOT recounting individuals, once they have been seen.
 
-y <- sdat[,c("AlphaCode","SiteXVisit",detectcols)] #all the one minute interval column counts. Also includes focal species name and the site x visit id, so that the data frames can be named by species and also we can properly fill in zeroes for all the site x visit ids which are not included in each data frame because the focal species was not observed
+y <- sdat[,c("AlphaCode","SiteXVisit","SiteXVisit_bird",detectcols)] #all the one minute interval column counts. Also includes focal species name and the site x visit id, so that the data frames can be named by species and also we can properly fill in zeroes for all the site x visit ids which are not included in each data frame because the focal species was not observed
 
 #aggregate counts by SitexVisit--some sites had multiple individual birds observed in one visit; that is, there were multiple rows for the same species and sitexvisit combo. This will add all the 1's together for the same species, within each SitexVisit combination
-y <- aggregate(y[,c(detectcols)], by=list(y$SiteXVisit, y$AlphaCode), FUN=sum)
-names(y)[1:2] <- c("SitexVisit","AlphaCode")
+#y <- aggregate(y[,c(detectcols)], by=list(y$SiteXVisit, y$AlphaCode), FUN=sum)
+#names(y)[1:2] <- c("SitexVisit","AlphaCode")
 
 
 y.list <- split(y, f=y$AlphaCode) #create a list of y dataframes, one for each species
 
 #set rownames as the SitexVisit variable 
 y.list <- lapply(y.list, function(x) {
-  row.names(x) <- x[,1]
-  x[,-1]
-})
+  row.names(x) <- x[,3]
+  x[,-3]
+}
 
 #remove the focal species column from each dataframe
 y.list <- lapply(y.list, function(x) {
@@ -108,20 +99,14 @@ AllSites #full list of all possible SiteXVisit possibilities--this has to be det
 missZ <- list()
 
 for (i in 1:length(y.list)) {
-missZ[[i]] <- AllSites[!(AllSites %in% row.names(y.list[[i]]))]  
+missZ[[i]] <- AllSites[!(AllSites %in% y.list[[i]]$SiteXVisit)]  
 zeroes <- matrix(0L, nrow=length(missZ[[i]]), ncol=dim(y.list[[i]])[2])
 colnames(zeroes) <- names(y.list[[i]])
 row.names(zeroes) <- missZ[[i]]
+zeroes[,1] <-row.names(zeroes)
 y.list[[i]] <- rbind(y.list[[i]], zeroes)
 }
 
-#sub in all non zero numbers as 1's; when we concatenated across distance bands, some site x visit combos ended up with multiple birds observed. Somehow doing this erased all the row names that specify which sitexvisit combo each represents, so I had to save and then repaste those rownames.
-
-for (i in 1:length(y.list)){
-  RNames <- row.names(y.list[[i]])
-  y.list[[i]] <- sapply(y.list[[i]], function(x) if(is.numeric(x)) replace(x,x>0,1) else x)
-  row.names(y.list[[i]]) <- RNames
-}
 
 #organize the rows alphabetically, so each one is in the same order and can match the environmental and observational variable frames
 
@@ -196,10 +181,13 @@ VIRA$captureHistory <- do.call(paste, c(VIRA[MRecapCols], sep=""))
 VIRA$captureHistory <- factor(VIRA$captureHistory,levels=grid$levels) #assign levels in case there are incomplete combinations within the set of actual obs
 
 
-VIRA.H <- table(row.names(VIRA), VIRA$captureHistory) #expanded new table w/ each capture history as its own column
+VIRA.H <- table(VIRA$SiteXVisit, VIRA$captureHistory) #expanded new table w/ each capture history as its own column
 head(VIRA.H)
 #remove the column that contains '00000' encounter history; it should always be the first column. This is because encounter probabilities are made out of observed individuals so you can't have a 00000 individual, because how could you observe it.
 VIRA.H <- VIRA.H[,-1]
+
+#alphabetize by site
+VIRA.H <- VIRA.H[order(row.names(VIRA.H)), ]
 
 intervalMat <- matrix(c('1','2','3', '4','5'), 790, 5, byrow=TRUE)
 class(VIRA.H) <- "matrix"
@@ -271,6 +259,8 @@ backTransform(M0, type="state") ##back transform to get abundance estimate; dete
 rowSums(getP(M0))
 round(getP(M0), 2)[1,]#get probabilities of each combination of detection histories
 
+#retrieve multinomial probabilities for each possible encounter history
+round(getP(M0), 2)[1,]
 
  #Estimate posterior distributions of the random variables (latent abundance or occurrence) using empirical Bayes methods.
 re <- ranef(M0)
@@ -286,7 +276,7 @@ plot(re)
 #an example of how you would plot change in observed bird abundance over a variable
 nd <- data.frame(JulianDate=seq(0, 1, length=50))
 E.abundance <- predict(M0.date, type="state", newdata=nd, appendData=TRUE)
-plot(Predicted ~ JulianDate, E.abundance, type="l", ylim=c(0, 5),ylab="VIRA / point", xlab="Julian Date")
+plot(Predicted ~ JulianDate, E.abundance, type="l", ylab="VIRA / point", xlab="Julian Date")
 lines(lower ~ JulianDate, E.abundance, col=gray(0.7))
 lines(upper ~ JulianDate, E.abundance, col=gray(0.7))
 

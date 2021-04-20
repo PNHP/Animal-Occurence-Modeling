@@ -1,0 +1,77 @@
+---
+title: "AbundanceModeling_CapRecap"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## `r paste(FocalSp)` Abundance Models Output
+
+The null model for `r FocalSp` (with constant environmental and observational covariates) yields the following:
+```{r null model}
+(M0 <- multinomPois(~1 ~1, umf.cr1, engine="R"))
+
+```
+
+# Back transform to get detection and abundance estimates
+
+This is the detection probability for the null model:
+```{r null model results, include=TRUE}
+#this is the detection probability for the null model
+backTransform(M0, type="det")
+
+#This is the abundance estimate for the null model:
+backTransform(M0, type="state")
+
+#Estimate posterior distributions of latent abundance using empirical Bayes methods
+re <- ranef(M0)
+EBUP <- bup(re, stat="mean")
+CI <- confint(re, level=0.9)
+rbind(PAO = c(Estimate = sum(EBUP), colSums(CI)) / 790)
+```
+
+Null model results, continued 
+This is the expected abundance for the null model, after correcting for detection rate: `r sum(predict(M0, type="state")$Predicted)` 
+<br>
+This is the realized abundance for the null model (what was actually observed): `r sum(bup(re, stat="mode"))` 
+<br>
+
+```{r model including just JulianDate as envir. covariate} 
+(M0.date <- multinomPois(~1 ~JulianDate, umf.cr1, engine="R"))
+```
+
+Back transform to get detection and abundance estimates
+
+This is the detection probability for the model with variables:
+```{r date model results, include=TRUE}
+#this is the detection probability for the  model
+backTransform(M0.date, type="det")
+
+#This is the abundance estimate for the  model, but we have to factor in the variablees present:
+lc <- linearComb(M0.date, c(1, 0), type="state") # Estimate abundance on the log scale when date=0; you can put in different levels for the variable if desired (e.g. its maximum, 1)
+backTransform(lc) #Abundance on the original scale
+
+#Estimate posterior distributions of latent abundance using empirical Bayes methods
+re <- ranef(M0.date)
+EBUP <- bup(re, stat="mean")
+CI <- confint(re, level=0.9)
+rbind(PAO = c(Estimate = sum(EBUP), colSums(CI)) / 790)
+```
+
+Model with date, continued 
+This is the expected abundance for the date model, after correcting for detection rate: `r sum(predict(M0.date, type="state")$Predicted)` 
+<br>
+This is the realized abundance for the  model (what was actually observed): `r sum(bup(re, stat="mode"))` 
+<br>
+# Variable Relationship Plots
+```{r plot, Julian Date, echo=FALSE}
+nd <- data.frame(JulianDate=seq(0, 1, length=50))
+E.abundance <- predict(M0.date, type="state", newdata=nd, appendData=TRUE)
+plot(Predicted ~ JulianDate, E.abundance, type="l", ylab="VIRA / point", xlab="Julian Date")
+lines(lower ~ JulianDate, E.abundance, col=gray(0.7))
+lines(upper ~ JulianDate, E.abundance, col=gray(0.7))
+```
+
+
